@@ -2,349 +2,372 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Scribble Racer</title>
   <style>
-    * { box-sizing: border-box; }
-    body {
+    * { box-sizing: border-box; touch-action: none; }
+    html, body {
       margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
       overflow: hidden;
-      background: #87ceeb;
-      font-family: sans-serif;
-      user-select: none;
-      -webkit-user-select: none;
+      background: #7ec0ee;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    #canvas3d {
-      width: 100vw;
-      height: 100vh;
+    #gameCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
       display: block;
     }
-    #draw-container {
+    #ui-container {
+      position: absolute;
+      top: 14px;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      pointer-events: none;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(0, 0, 0, 0.6);
+      color: #fff;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    #draw-box {
       position: absolute;
       bottom: 24px;
       left: 50%;
       transform: translateX(-50%);
-      width: 170px;
-      height: 170px;
-      background: rgba(255, 255, 255, 0.92);
+      width: 180px;
+      height: 180px;
+      background: rgba(255, 255, 255, 0.95);
       border: 3px solid #222;
       border-radius: 20px;
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
       touch-action: none;
     }
     #drawCanvas {
       width: 100%;
       height: 100%;
-      border-radius: 17px;
       display: block;
-    }
-    #ui-tip {
-      position: absolute;
-      top: 16px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.65);
-      color: #fff;
-      padding: 8px 18px;
-      border-radius: 24px;
-      font-size: 14px;
-      font-weight: bold;
-      letter-spacing: 0.5px;
-      pointer-events: none;
+      border-radius: 17px;
+      cursor: crosshair;
     }
   </style>
-
-  <!-- Three.js and Cannon-es UMD global builds -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.umd.js"></script>
 </head>
 <body>
-  <div id="ui-tip">Draw a shape below to drive!</div>
-  <canvas id="canvas3d"></canvas>
-  <div id="draw-container">
-    <canvas id="drawCanvas" width="170" height="170"></canvas>
+  <canvas id="gameCanvas"></canvas>
+  
+  <div id="ui-container">
+    <div class="badge" id="statusBadge">Draw a shape below to run!</div>
+  </div>
+
+  <div id="draw-box">
+    <canvas id="drawCanvas" width="180" height="180"></canvas>
   </div>
 
   <script>
-    // --- 1. ENGINE & SCENE SETUP ---
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x8ae2ff);
+    // --- 1. DISPLAY & VIEWPORT SETUP ---
+    const gCanvas = document.getElementById('gameCanvas');
+    const gCtx = gCanvas.getContext('2d');
+    const dCanvas = document.getElementById('drawCanvas');
+    const dCtx = dCanvas.getContext('2d');
 
-    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({
-      canvas: document.getElementById('canvas3d'),
-      antialias: true
-    });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.9);
-    scene.add(hemiLight);
-
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
-    dirLight.position.set(15, 30, 20);
-    scene.add(dirLight);
-
-    const world = new CANNON.World();
-    world.gravity.set(0, -20, 0);
-
-    const groundMat = new CANNON.Material("ground");
-    const wheelMat = new CANNON.Material("wheel");
-    const contactMat = new CANNON.ContactMaterial(groundMat, wheelMat, {
-      friction: 1.5,
-      restitution: 0.05
-    });
-    world.addContactMaterial(contactMat);
+    function resize() {
+      gCanvas.width = window.innerWidth * window.devicePixelRatio;
+      gCanvas.height = window.innerHeight * window.devicePixelRatio;
+    }
+    window.addEventListener('resize', resize);
+    resize();
 
     // --- 2. TRACK GEOMETRY ---
-    function addTrackSegment(x, y, z, w, h, d) {
-      const body = new CANNON.Body({ mass: 0, material: groundMat });
-      body.addShape(new CANNON.Box(new CANNON.Vec3(w / 2, h / 2, d / 2)));
-      body.position.set(x, y, z);
-      world.addBody(body);
+    // Track segments with varying elevation and obstacles
+    const track = [
+      { x1: -50,  y1: 300, x2: 400,  y2: 300 }, // Start flat
+      { x1: 400,  y1: 300, x2: 400,  y2: 240 }, // Step ledge up
+      { x1: 400,  y1: 240, x2: 900,  y2: 240 }, // High ground
+      { x1: 900,  y1: 240, x2: 1200, y2: 350 }, // Down ramp
+      { x1: 1200, y1: 350, x2: 1500, y2: 350 }, // Water / basin bed
+      { x1: 1500, y1: 350, x2: 1600, y2: 260 }, // Steep ramp up
+      { x1: 1600, y1: 260, x2: 2600, y2: 260 }  // Final sprint
+    ];
 
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(w, h, d),
-        new THREE.MeshStandardMaterial({ color: 0x90a4ae, roughness: 0.7 })
-      );
-      mesh.position.copy(body.position);
-      scene.add(mesh);
+    function getGroundY(x) {
+      for (const seg of track) {
+        const minX = Math.min(seg.x1, seg.x2);
+        const maxX = Math.max(seg.x1, seg.x2);
+        if (x >= minX && x <= maxX) {
+          if (seg.x1 === seg.x2) return Math.min(seg.y1, seg.y2);
+          const t = (x - seg.x1) / (seg.x2 - seg.x1);
+          return seg.y1 + t * (seg.y2 - seg.y1);
+        }
+      }
+      return 600;
     }
 
-    // Start runway
-    addTrackSegment(0, 0, 40, 10, 1, 100);
-    // Obstacle block / ledge
-    addTrackSegment(0, 1.25, -15, 10, 1.5, 4);
-    // Upper track after obstacle
-    addTrackSegment(0, 2.0, -45, 10, 1, 60);
-
-    // --- 3. RACER RIG ---
-    function createRacer(color, startX, startZ) {
-      const chassisBody = new CANNON.Body({ mass: 6 });
-      chassisBody.addShape(new CANNON.Box(new CANNON.Vec3(0.5, 0.35, 0.8)));
-      chassisBody.position.set(startX, 3, startZ);
-      world.addBody(chassisBody);
-
-      const chassisMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(1.0, 0.7, 1.6),
-        new THREE.MeshStandardMaterial({ color, roughness: 0.3 })
-      );
-      scene.add(chassisMesh);
-
-      const wheels = [];
-      const offsets = [
-        new CANNON.Vec3(0.75, 0, 0),
-        new CANNON.Vec3(-0.75, 0, 0)
-      ];
-
-      offsets.forEach(offset => {
-        const wBody = new CANNON.Body({ mass: 1.2, material: wheelMat });
-        wBody.position.copy(chassisBody.position).vadd(offset);
-        world.addBody(wBody);
-
-        const hinge = new CANNON.HingeConstraint(chassisBody, wBody, {
-          pivotA: offset,
-          axisA: new CANNON.Vec3(1, 0, 0),
-          pivotB: new CANNON.Vec3(0, 0, 0),
-          axisB: new CANNON.Vec3(1, 0, 0)
-        });
-        hinge.enableMotor();
-        hinge.setMotorSpeed(-12);
-        hinge.setMotorMaxForce(250);
-        world.addConstraint(hinge);
-
-        const wGroup = new THREE.Group();
-        scene.add(wGroup);
-
-        wheels.push({ body: wBody, group: wGroup });
-      });
-
-      return { chassisBody, chassisMesh, wheels };
-    }
-
-    const player = createRacer(0xe63946, 1.8, 70);
-    const bot = createRacer(0x1d3557, -1.8, 70);
-
-    // --- 4. SHAPE GENERATION & UPDATE ---
-    function updateLimbShape(racer, pointList) {
-      racer.wheels.forEach(wheel => {
-        while (wheel.body.shapes.length > 0) {
-          wheel.body.shapes.pop();
-          wheel.body.shapeOffsets.pop();
-          wheel.body.shapeOrientations.pop();
-        }
-        while (wheel.group.children.length > 0) {
-          wheel.group.remove(wheel.group.children[0]);
-        }
-
-        for (let i = 0; i < pointList.length - 1; i++) {
-          const p1 = pointList[i];
-          const p2 = pointList[i + 1];
-          const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-          if (dist < 0.05) continue;
-
-          const midY = (p1.y + p2.y) / 2;
-          const midZ = (p1.x + p2.x) / 2;
-          const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-
-          const box = new CANNON.Box(new CANNON.Vec3(0.06, dist / 2, 0.06));
-          const q = new CANNON.Quaternion();
-          q.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -angle + Math.PI / 2);
-          wheel.body.addShape(box, new CANNON.Vec3(0, midY, midZ), q);
-
-          const segGeo = new THREE.CylinderGeometry(0.06, 0.06, dist, 8);
-          const segMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 });
-          const segMesh = new THREE.Mesh(segGeo, segMat);
-          segMesh.position.set(0, midY, midZ);
-          segMesh.rotation.x = -angle + Math.PI / 2;
-          wheel.group.add(segMesh);
-        }
-        wheel.body.updateMassProperties();
-      });
-    }
-
-    function generateCirclePoints(radius = 0.65, steps = 14) {
+    // --- 3. RACER SIMULATION ---
+    function makeDefaultPoints() {
       const pts = [];
-      for (let i = 0; i <= steps; i++) {
-        const theta = (i / steps) * Math.PI * 2;
-        pts.push({ x: Math.cos(theta) * radius, y: Math.sin(theta) * radius });
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        pts.push({ x: Math.cos(a) * 32, y: Math.sin(a) * 32 });
       }
       return pts;
     }
 
-    function generateClimberPoints() {
+    function makeClimberPoints() {
       return [
-        { x: -0.2, y: -0.85 },
-        { x: 0.35, y: 0.85 },
-        { x: 0.85, y: 0.2 },
-        { x: -0.75, y: 0.45 }
+        { x: 0, y: -45 },
+        { x: 25, y: 35 },
+        { x: -35, y: 15 },
+        { x: 0, y: -45 }
       ];
     }
 
-    updateLimbShape(player, generateCirclePoints());
-    updateLimbShape(bot, generateCirclePoints());
+    const player = {
+      x: 60,
+      y: 200,
+      vx: 0,
+      vy: 0,
+      angle: 0,
+      points: makeDefaultPoints(),
+      color: '#e63946'
+    };
 
-    // --- 5. DRAWING INPUT ---
-    const drawCanvas = document.getElementById('drawCanvas');
-    const ctx = drawCanvas.getContext('2d');
-    let drawing = false;
+    const bot = {
+      x: 20,
+      y: 200,
+      vx: 0,
+      vy: 0,
+      angle: 0,
+      points: makeDefaultPoints(),
+      color: '#457b9d',
+      adapted: false
+    };
+
+    function updateRacer(r, isAI = false) {
+      // Motor angular rotation
+      r.angle += 0.22;
+
+      // Check limb tips against the terrain
+      let onGround = false;
+      let pushX = 0;
+      let pushY = 0;
+
+      for (const pt of r.points) {
+        // Rotate point
+        const cos = Math.cos(r.angle);
+        const sin = Math.sin(r.angle);
+        const px = r.x + (pt.x * cos - pt.y * sin);
+        const py = r.y + (pt.x * sin + pt.y * cos);
+
+        const groundY = getGroundY(px);
+        if (py > groundY) {
+          onGround = true;
+          const penetration = py - groundY;
+          pushY -= penetration * 0.4;
+          // Forward traction propulsion
+          pushX += 0.95;
+        }
+      }
+
+      // Physics integration
+      r.vx += pushX;
+      r.vy += pushY + 0.65; // Gravity
+      r.vx *= 0.88;         // Drag
+      r.vy *= 0.88;
+
+      r.x += r.vx;
+      r.y += r.vy;
+
+      // Keep chassis above track line
+      const baseline = getGroundY(r.x) - 15;
+      if (r.y > baseline) {
+        r.y = baseline;
+        r.vy = 0;
+      }
+
+      // AI auto-switch near the step obstacle
+      if (isAI && !r.adapted && r.x > 330) {
+        r.points = makeClimberPoints();
+        r.adapted = true;
+      }
+    }
+
+    // --- 4. DRAWING CANVAS LOGIC ---
+    let isDrawing = false;
     let stroke = [];
 
     function getCoords(e) {
-      const rect = drawCanvas.getBoundingClientRect();
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-      return { x: clientX - rect.left, y: clientY - rect.top };
+      const rect = dCanvas.getBoundingClientRect();
+      const cx = e.touches ? e.touches[0].clientX : e.clientX;
+      const cy = e.touches ? e.touches[0].clientY : e.clientY;
+      return {
+        x: (cx - rect.left) * (dCanvas.width / rect.width),
+        y: (cy - rect.top) * (dCanvas.height / rect.height)
+      };
     }
 
-    function startDraw(e) {
-      drawing = true;
+    function onPointerDown(e) {
+      e.preventDefault();
+      isDrawing = true;
       stroke = [];
-      ctx.clearRect(0, 0, 170, 170);
-      drawMove(e);
+      dCtx.clearRect(0, 0, dCanvas.width, dCanvas.height);
+      onPointerMove(e);
     }
 
-    function drawMove(e) {
-      if (!drawing) return;
-      const pt = getCoords(e);
-      stroke.push(pt);
+    function onPointerMove(e) {
+      if (!isDrawing) return;
+      e.preventDefault();
+      const p = getCoords(e);
+      stroke.push(p);
 
-      ctx.lineWidth = 7;
-      ctx.lineCap = 'round';
-      ctx.strokeStyle = '#222';
+      dCtx.lineWidth = 8;
+      dCtx.lineCap = 'round';
+      dCtx.strokeStyle = '#1d3557';
       if (stroke.length > 1) {
-        ctx.beginPath();
-        ctx.moveTo(stroke[stroke.length - 2].x, stroke[stroke.length - 2].y);
-        ctx.lineTo(pt.x, pt.y);
-        ctx.stroke();
+        dCtx.beginPath();
+        dCtx.moveTo(stroke[stroke.length - 2].x, stroke[stroke.length - 2].y);
+        dCtx.lineTo(p.x, p.y);
+        dCtx.stroke();
       }
     }
 
-    function endDraw() {
-      if (!drawing || stroke.length < 3) {
-        drawing = false;
-        return;
-      }
-      drawing = false;
+    function onPointerUp(e) {
+      if (!isDrawing) return;
+      isDrawing = false;
+      if (stroke.length < 3) return;
 
+      // Center and normalize drawn coordinates
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      stroke.forEach(p => {
-        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
-        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
-      });
+      for (const p of stroke) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      }
 
       const cx = (minX + maxX) / 2;
       const cy = (minY + maxY) / 2;
-      const scale = Math.max(maxX - minX, maxY - minY, 40) / 1.5;
+      const scale = Math.max(maxX - minX, maxY - minY, 30) / 70;
 
-      const downsampled = [];
-      const step = Math.max(1, Math.floor(stroke.length / 14));
+      const pts = [];
+      const step = Math.max(1, Math.floor(stroke.length / 16));
       for (let i = 0; i < stroke.length; i += step) {
-        downsampled.push({
+        pts.push({
           x: (stroke[i].x - cx) / scale,
-          y: -(stroke[i].y - cy) / scale
+          y: (stroke[i].y - cy) / scale
         });
       }
-      downsampled.push(downsampled[0]);
-
-      updateLimbShape(player, downsampled);
+      pts.push({ x: pts[0].x, y: pts[0].y });
+      player.points = pts;
     }
 
-    drawCanvas.addEventListener('mousedown', startDraw);
-    window.addEventListener('mousemove', drawMove);
-    window.addEventListener('mouseup', endDraw);
+    // Touch and mouse event binds
+    dCanvas.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('mouseup', onPointerUp);
 
-    drawCanvas.addEventListener('touchstart', startDraw, { passive: false });
-    window.addEventListener('touchmove', drawMove, { passive: false });
-    window.addEventListener('touchend', endDraw);
+    dCanvas.addEventListener('touchstart', onPointerDown, { passive: false });
+    window.addEventListener('touchmove', onPointerMove, { passive: false });
+    window.addEventListener('touchend', onPointerUp);
 
-    // --- 6. RENDER & PHYSICS LOOP ---
-    let botSwapped = false;
+    // --- 5. RENDER LOOP ---
+    function renderRacer(r) {
+      gCtx.save();
+      gCtx.translate(r.x, r.y);
 
-    function animate() {
-      requestAnimationFrame(animate);
+      // Limbs / wheels
+      gCtx.save();
+      gCtx.rotate(r.angle);
+      gCtx.strokeStyle = '#111';
+      gCtx.lineWidth = 7;
+      gCtx.lineCap = 'round';
+      gCtx.lineJoin = 'round';
 
-      world.step(1 / 60);
-
-      // Player Sync
-      player.chassisMesh.position.copy(player.chassisBody.position);
-      player.chassisMesh.quaternion.copy(player.chassisBody.quaternion);
-      player.wheels.forEach(w => {
-        w.group.position.copy(w.body.position);
-        w.group.quaternion.copy(w.body.quaternion);
-      });
-
-      // Bot Sync
-      bot.chassisMesh.position.copy(bot.chassisBody.position);
-      bot.chassisMesh.quaternion.copy(bot.chassisBody.quaternion);
-      bot.wheels.forEach(w => {
-        w.group.position.copy(w.body.position);
-        w.group.quaternion.copy(w.body.quaternion);
-      });
-
-      // Bot adapts near the obstacle
-      if (!botSwapped && bot.chassisBody.position.z < -6) {
-        botSwapped = true;
-        updateLimbShape(bot, generateClimberPoints());
+      if (r.points.length > 1) {
+        gCtx.beginPath();
+        gCtx.moveTo(r.points[0].x, r.points[0].y);
+        for (let i = 1; i < r.points.length; i++) {
+          gCtx.lineTo(r.points[i].x, r.points[i].y);
+        }
+        gCtx.stroke();
       }
+      gCtx.restore();
 
-      // Camera Chase
-      const pos = player.chassisBody.position;
-      camera.position.x = THREE.MathUtils.lerp(camera.position.x, pos.x, 0.08);
-      camera.position.y = THREE.MathUtils.lerp(camera.position.y, pos.y + 4.5, 0.08);
-      camera.position.z = THREE.MathUtils.lerp(camera.position.z, pos.z + 8.5, 0.08);
-      camera.lookAt(pos.x, pos.y + 1, pos.z - 2);
+      // Vehicle Chassis Body
+      gCtx.fillStyle = r.color;
+      gCtx.fillRect(-22, -18, 44, 24);
 
-      renderer.render(scene, camera);
+      // Rider head
+      gCtx.fillStyle = '#fff';
+      gCtx.beginPath();
+      gCtx.arc(0, -22, 10, 0, Math.PI * 2);
+      gCtx.fill();
+      gCtx.fillStyle = '#111';
+      gCtx.beginPath();
+      gCtx.arc(4, -22, 3, 0, Math.PI * 2);
+      gCtx.fill();
+
+      gCtx.restore();
     }
 
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+    function loop() {
+      updateRacer(player);
+      updateRacer(bot, true);
 
-    animate();
+      // Dynamic Camera follow
+      const dpr = window.devicePixelRatio || 1;
+      const viewW = gCanvas.width / dpr;
+      const viewH = gCanvas.height / dpr;
+      const camX = player.x - viewW * 0.35;
+      const camY = player.y - viewH * 0.55;
+
+      gCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // Sky background
+      gCtx.fillStyle = '#a8e6cf';
+      gCtx.fillRect(0, 0, viewW, viewH);
+
+      gCtx.save();
+      gCtx.translate(-camX, -camY);
+
+      // Draw Terrain / Path
+      gCtx.strokeStyle = '#555';
+      gCtx.lineWidth = 14;
+      gCtx.lineCap = 'round';
+      gCtx.lineJoin = 'round';
+      gCtx.beginPath();
+      gCtx.moveTo(track[0].x1, track[0].y1);
+      for (const seg of track) {
+        gCtx.lineTo(seg.x2, seg.y2);
+      }
+      gCtx.stroke();
+
+      // Terrain fill underneath
+      gCtx.lineTo(3000, 800);
+      gCtx.lineTo(-100, 800);
+      gCtx.closePath();
+      gCtx.fillStyle = '#8b5a2b';
+      gCtx.fill();
+
+      // Render Racers
+      renderRacer(bot);
+      renderRacer(player);
+
+      gCtx.restore();
+
+      requestAnimationFrame(loop);
+    }
+
+    requestAnimationFrame(loop);
   </script>
 </body>
 </html>
