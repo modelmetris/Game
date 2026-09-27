@@ -3,14 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Scribble Racer Prototype</title>
+  <title>Scribble Racer</title>
   <style>
+    * { box-sizing: border-box; }
     body {
       margin: 0;
       overflow: hidden;
       background: #87ceeb;
       font-family: sans-serif;
       user-select: none;
+      -webkit-user-select: none;
     }
     #canvas3d {
       width: 100vw;
@@ -22,127 +24,124 @@
       bottom: 24px;
       left: 50%;
       transform: translateX(-50%);
-      width: 180px;
-      height: 180px;
-      background: rgba(255, 255, 255, 0.85);
-      border: 3px solid #333;
-      border-radius: 16px;
-      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+      width: 170px;
+      height: 170px;
+      background: rgba(255, 255, 255, 0.92);
+      border: 3px solid #222;
+      border-radius: 20px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
       touch-action: none;
     }
     #drawCanvas {
       width: 100%;
       height: 100%;
-      border-radius: 13px;
+      border-radius: 17px;
+      display: block;
     }
     #ui-tip {
       position: absolute;
-      top: 12px;
+      top: 16px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0,0,0,0.6);
-      color: white;
-      padding: 6px 14px;
-      border-radius: 20px;
+      background: rgba(0, 0, 0, 0.65);
+      color: #fff;
+      padding: 8px 18px;
+      border-radius: 24px;
       font-size: 14px;
+      font-weight: bold;
+      letter-spacing: 0.5px;
       pointer-events: none;
     }
   </style>
-  <!-- Three.js and Cannon-es via CDN -->
+
+  <!-- Three.js and Cannon-es UMD global builds -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.umd.js"></script>
 </head>
 <body>
-  <div id="ui-tip">Draw a shape below to change your wheels!</div>
+  <div id="ui-tip">Draw a shape below to drive!</div>
   <canvas id="canvas3d"></canvas>
   <div id="draw-container">
-    <canvas id="drawCanvas" width="180" height="180"></canvas>
+    <canvas id="drawCanvas" width="170" height="170"></canvas>
   </div>
 
   <script>
-    // --- 1. THREE.JS & CANNON-ES SETUP ---
+    // --- 1. ENGINE & SCENE SETUP ---
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xbbf2f6);
+    scene.background = new THREE.Color(0x8ae2ff);
 
     const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('canvas3d'), antialias: true });
+    const renderer = new THREE.WebGLRenderer({
+      canvas: document.getElementById('canvas3d'),
+      antialias: true
+    });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.shadowMap.enabled = true;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-    scene.add(ambientLight);
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.9);
+    scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(10, 25, 10);
-    dirLight.castShadow = true;
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+    dirLight.position.set(15, 30, 20);
     scene.add(dirLight);
 
     const world = new CANNON.World();
-    world.gravity.set(0, -18, 0);
+    world.gravity.set(0, -20, 0);
 
-    // Track surface material (friction settings)
     const groundMat = new CANNON.Material("ground");
     const wheelMat = new CANNON.Material("wheel");
     const contactMat = new CANNON.ContactMaterial(groundMat, wheelMat, {
-      friction: 1.2,
-      restitution: 0.1
+      friction: 1.5,
+      restitution: 0.05
     });
     world.addContactMaterial(contactMat);
 
-    // --- 2. BUILD THE RACETRACK ---
-    function addTrackSegment(x, y, z, w, h, d, rx = 0) {
-      // Cannon Body
+    // --- 2. TRACK GEOMETRY ---
+    function addTrackSegment(x, y, z, w, h, d) {
       const body = new CANNON.Body({ mass: 0, material: groundMat });
       body.addShape(new CANNON.Box(new CANNON.Vec3(w / 2, h / 2, d / 2)));
       body.position.set(x, y, z);
-      body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), rx);
       world.addBody(body);
 
-      // Three Mesh
-      const geo = new THREE.BoxGeometry(w, h, d);
-      const mat = new THREE.MeshStandardMaterial({ color: 0xdedede, roughness: 0.8 });
-      const mesh = new THREE.Mesh(geo, mat);
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(w, h, d),
+        new THREE.MeshStandardMaterial({ color: 0x90a4ae, roughness: 0.7 })
+      );
       mesh.position.copy(body.position);
-      mesh.quaternion.copy(body.quaternion);
-      mesh.receiveShadow = true;
       scene.add(mesh);
     }
 
-    // Flat starting road
-    addTrackSegment(0, 0, 50, 10, 1, 120);
-    // Obstacle step / ledge
-    addTrackSegment(0, 1.5, -15, 10, 2, 4);
-    // Road continuation after step
-    addTrackSegment(0, 2.5, -45, 10, 1, 60);
+    // Start runway
+    addTrackSegment(0, 0, 40, 10, 1, 100);
+    // Obstacle block / ledge
+    addTrackSegment(0, 1.25, -15, 10, 1.5, 4);
+    // Upper track after obstacle
+    addTrackSegment(0, 2.0, -45, 10, 1, 60);
 
-    // --- 3. VEHICLE FACTORY ---
-    function createRacer(color, startZ, isAI = false) {
-      // Chassis
-      const chassisBody = new CANNON.Body({ mass: 5 });
-      chassisBody.addShape(new CANNON.Box(new CANNON.Vec3(0.6, 0.4, 0.9)));
-      chassisBody.position.set(isAI ? -2 : 2, 3, startZ);
+    // --- 3. RACER RIG ---
+    function createRacer(color, startX, startZ) {
+      const chassisBody = new CANNON.Body({ mass: 6 });
+      chassisBody.addShape(new CANNON.Box(new CANNON.Vec3(0.5, 0.35, 0.8)));
+      chassisBody.position.set(startX, 3, startZ);
       world.addBody(chassisBody);
 
       const chassisMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(1.2, 0.8, 1.8),
-        new THREE.MeshStandardMaterial({ color })
+        new THREE.BoxGeometry(1.0, 0.7, 1.6),
+        new THREE.MeshStandardMaterial({ color, roughness: 0.3 })
       );
-      chassisMesh.castShadow = true;
       scene.add(chassisMesh);
 
-      // Wheels setup (2 sides)
       const wheels = [];
-      const wheelOffsets = [
-        new CANNON.Vec3(0.9, 0, 0),
-        new CANNON.Vec3(-0.9, 0, 0)
+      const offsets = [
+        new CANNON.Vec3(0.75, 0, 0),
+        new CANNON.Vec3(-0.75, 0, 0)
       ];
 
-      wheelOffsets.forEach(offset => {
-        const wBody = new CANNON.Body({ mass: 1, material: wheelMat });
+      offsets.forEach(offset => {
+        const wBody = new CANNON.Body({ mass: 1.2, material: wheelMat });
         wBody.position.copy(chassisBody.position).vadd(offset);
         world.addBody(wBody);
 
-        // Hinge Joint
         const hinge = new CANNON.HingeConstraint(chassisBody, wBody, {
           pivotA: offset,
           axisA: new CANNON.Vec3(1, 0, 0),
@@ -150,8 +149,8 @@
           axisB: new CANNON.Vec3(1, 0, 0)
         });
         hinge.enableMotor();
-        hinge.setMotorSpeed(-12); // Forward spin
-        hinge.setMotorMaxForce(300);
+        hinge.setMotorSpeed(-12);
+        hinge.setMotorMaxForce(250);
         world.addConstraint(hinge);
 
         const wGroup = new THREE.Group();
@@ -160,29 +159,24 @@
         wheels.push({ body: wBody, group: wGroup });
       });
 
-      return { chassisBody, chassisMesh, wheels, isAI };
+      return { chassisBody, chassisMesh, wheels };
     }
 
-    const player = createRacer(0xff3344, 90, false);
-    const bot = createRacer(0x3366ff, 90, true);
+    const player = createRacer(0xe63946, 1.8, 70);
+    const bot = createRacer(0x1d3557, -1.8, 70);
 
-    // --- 4. SHAPE UPDATE ENGINE ---
+    // --- 4. SHAPE GENERATION & UPDATE ---
     function updateLimbShape(racer, pointList) {
       racer.wheels.forEach(wheel => {
-        // Clear physics shapes
         while (wheel.body.shapes.length > 0) {
           wheel.body.shapes.pop();
           wheel.body.shapeOffsets.pop();
           wheel.body.shapeOrientations.pop();
         }
-        wheel.body.updateMassProperties();
-
-        // Clear 3D meshes
         while (wheel.group.children.length > 0) {
           wheel.group.remove(wheel.group.children[0]);
         }
 
-        // Add segment capsules / boxes along stroke
         for (let i = 0; i < pointList.length - 1; i++) {
           const p1 = pointList[i];
           const p2 = pointList[i + 1];
@@ -193,15 +187,13 @@
           const midZ = (p1.x + p2.x) / 2;
           const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
 
-          // Cannon shape
-          const box = new CANNON.Box(new CANNON.Vec3(0.08, dist / 2, 0.08));
+          const box = new CANNON.Box(new CANNON.Vec3(0.06, dist / 2, 0.06));
           const q = new CANNON.Quaternion();
           q.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -angle + Math.PI / 2);
           wheel.body.addShape(box, new CANNON.Vec3(0, midY, midZ), q);
 
-          // Three.js visual
-          const segGeo = new THREE.CylinderGeometry(0.07, 0.07, dist, 8);
-          const segMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+          const segGeo = new THREE.CylinderGeometry(0.06, 0.06, dist, 8);
+          const segMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 });
           const segMesh = new THREE.Mesh(segGeo, segMat);
           segMesh.position.set(0, midY, midZ);
           segMesh.rotation.x = -angle + Math.PI / 2;
@@ -211,8 +203,7 @@
       });
     }
 
-    // Default Circle Points
-    function generateCirclePoints(radius = 0.7, steps = 14) {
+    function generateCirclePoints(radius = 0.65, steps = 14) {
       const pts = [];
       for (let i = 0; i <= steps; i++) {
         const theta = (i / steps) * Math.PI * 2;
@@ -221,26 +212,25 @@
       return pts;
     }
 
-    // Default Hook / Climber Points for AI
     function generateClimberPoints() {
       return [
-        { x: -0.2, y: -0.9 },
-        { x: 0.3, y: 0.9 },
-        { x: 0.9, y: 0.2 },
-        { x: -0.8, y: 0.5 }
+        { x: -0.2, y: -0.85 },
+        { x: 0.35, y: 0.85 },
+        { x: 0.85, y: 0.2 },
+        { x: -0.75, y: 0.45 }
       ];
     }
 
     updateLimbShape(player, generateCirclePoints());
     updateLimbShape(bot, generateCirclePoints());
 
-    // --- 5. DRAWING CANVAS LOGIC ---
+    // --- 5. DRAWING INPUT ---
     const drawCanvas = document.getElementById('drawCanvas');
     const ctx = drawCanvas.getContext('2d');
     let drawing = false;
     let stroke = [];
 
-    function getPos(e) {
+    function getCoords(e) {
       const rect = drawCanvas.getBoundingClientRect();
       const clientX = e.touches ? e.touches[0].clientX : e.clientX;
       const clientY = e.touches ? e.touches[0].clientY : e.clientY;
@@ -250,76 +240,73 @@
     function startDraw(e) {
       drawing = true;
       stroke = [];
-      ctx.clearRect(0, 0, 180, 180);
-      addPoint(e);
+      ctx.clearRect(0, 0, 170, 170);
+      drawMove(e);
     }
 
-    function addPoint(e) {
+    function drawMove(e) {
       if (!drawing) return;
-      const p = getPos(e);
-      stroke.push(p);
+      const pt = getCoords(e);
+      stroke.push(pt);
 
-      ctx.lineWidth = 8;
+      ctx.lineWidth = 7;
       ctx.lineCap = 'round';
-      ctx.strokeStyle = '#111';
+      ctx.strokeStyle = '#222';
       if (stroke.length > 1) {
         ctx.beginPath();
         ctx.moveTo(stroke[stroke.length - 2].x, stroke[stroke.length - 2].y);
-        ctx.lineTo(p.x, p.y);
+        ctx.lineTo(pt.x, pt.y);
         ctx.stroke();
       }
     }
 
-    function stopDraw() {
+    function endDraw() {
       if (!drawing || stroke.length < 3) {
         drawing = false;
         return;
       }
       drawing = false;
 
-      // Normalize stroke centered at (0, 0)
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      stroke.forEach(pt => {
-        minX = Math.min(minX, pt.x); maxX = Math.max(maxX, pt.x);
-        minY = Math.min(minY, pt.y); maxY = Math.max(maxY, pt.y);
+      stroke.forEach(p => {
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
       });
 
       const cx = (minX + maxX) / 2;
       const cy = (minY + maxY) / 2;
-      const scale = Math.max(maxX - minX, maxY - minY, 40) / 1.6;
+      const scale = Math.max(maxX - minX, maxY - minY, 40) / 1.5;
 
-      // Downsample to keep physics smooth
-      const normalized = [];
+      const downsampled = [];
       const step = Math.max(1, Math.floor(stroke.length / 14));
       for (let i = 0; i < stroke.length; i += step) {
-        normalized.push({
+        downsampled.push({
           x: (stroke[i].x - cx) / scale,
           y: -(stroke[i].y - cy) / scale
         });
       }
-      // Re-link end if closed
-      normalized.push(normalized[0]);
+      downsampled.push(downsampled[0]);
 
-      updateLimbShape(player, normalized);
+      updateLimbShape(player, downsampled);
     }
 
     drawCanvas.addEventListener('mousedown', startDraw);
-    window.addEventListener('mousemove', addPoint);
-    window.addEventListener('mouseup', stopDraw);
+    window.addEventListener('mousemove', drawMove);
+    window.addEventListener('mouseup', endDraw);
 
-    drawCanvas.addEventListener('touchstart', startDraw);
-    window.addEventListener('touchmove', addPoint);
-    window.addEventListener('touchend', stopDraw);
+    drawCanvas.addEventListener('touchstart', startDraw, { passive: false });
+    window.addEventListener('touchmove', drawMove, { passive: false });
+    window.addEventListener('touchend', endDraw);
 
-    // --- 6. GAME LOOP ---
-    let aiStepTriggered = false;
+    // --- 6. RENDER & PHYSICS LOOP ---
+    let botSwapped = false;
 
     function animate() {
       requestAnimationFrame(animate);
 
       world.step(1 / 60);
 
-      // Sync Player Meshes
+      // Player Sync
       player.chassisMesh.position.copy(player.chassisBody.position);
       player.chassisMesh.quaternion.copy(player.chassisBody.quaternion);
       player.wheels.forEach(w => {
@@ -327,7 +314,7 @@
         w.group.quaternion.copy(w.body.quaternion);
       });
 
-      // Sync Bot Meshes
+      // Bot Sync
       bot.chassisMesh.position.copy(bot.chassisBody.position);
       bot.chassisMesh.quaternion.copy(bot.chassisBody.quaternion);
       bot.wheels.forEach(w => {
@@ -335,18 +322,18 @@
         w.group.quaternion.copy(w.body.quaternion);
       });
 
-      // Simple AI logic: change to climber hooks right before the obstacle
-      if (!aiStepTriggered && bot.chassisBody.position.z < -5) {
-        aiStepTriggered = true;
+      // Bot adapts near the obstacle
+      if (!botSwapped && bot.chassisBody.position.z < -6) {
+        botSwapped = true;
         updateLimbShape(bot, generateClimberPoints());
       }
 
-      // Smooth Camera tracking behind player
-      const targetPos = player.chassisBody.position;
-      camera.position.x = THREE.MathUtils.lerp(camera.position.x, targetPos.x, 0.05);
-      camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetPos.y + 4.5, 0.05);
-      camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetPos.z + 8.5, 0.05);
-      camera.lookAt(targetPos.x, targetPos.y + 1, targetPos.z - 2);
+      // Camera Chase
+      const pos = player.chassisBody.position;
+      camera.position.x = THREE.MathUtils.lerp(camera.position.x, pos.x, 0.08);
+      camera.position.y = THREE.MathUtils.lerp(camera.position.y, pos.y + 4.5, 0.08);
+      camera.position.z = THREE.MathUtils.lerp(camera.position.z, pos.z + 8.5, 0.08);
+      camera.lookAt(pos.x, pos.y + 1, pos.z - 2);
 
       renderer.render(scene, camera);
     }
