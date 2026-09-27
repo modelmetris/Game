@@ -24,47 +24,101 @@
       display: block;
       background: #8ae2ff;
     }
-    #status-pill {
+    #controls-panel {
       position: absolute;
-      top: 18px;
+      top: 10px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.7);
+      background: rgba(0, 0, 0, 0.75);
       color: #fff;
-      padding: 8px 18px;
-      border-radius: 20px;
-      font-size: 14px;
-      font-weight: 600;
-      pointer-events: none;
-      z-index: 10;
+      padding: 8px 14px;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 11px;
+      z-index: 100;
+      width: 90%;
+      max-width: 320px;
+    }
+    .slider-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .slider-row label {
+      width: 85px;
+      font-weight: bold;
+    }
+    .slider-row input[type="range"] {
+      flex: 1;
+      height: 6px;
+      accent-color: #ff3344;
+    }
+    #finish-banner {
+      position: absolute;
+      top: 35%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      padding: 16px 28px;
+      border-radius: 16px;
+      font-size: 22px;
+      font-weight: bold;
+      text-align: center;
+      display: none;
+      z-index: 200;
+      border: 2px solid gold;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
     }
     #draw-box {
       position: absolute;
-      bottom: 24px;
+      bottom: 20px;
       left: 50%;
       transform: translateX(-50%);
-      width: 180px;
-      height: 180px;
+      width: 170px;
+      height: 170px;
       background: #ffffff;
       border: 3px solid #111;
       border-radius: 20px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.35);
       z-index: 20;
     }
     #drawCanvas {
-      width: 180px;
-      height: 180px;
+      width: 170px;
+      height: 170px;
       display: block;
       border-radius: 17px;
     }
   </style>
 </head>
 <body>
+  <div id="controls-panel">
+    <div class="slider-row">
+      <label for="speedRange">Speed: <span id="speedVal">0.6</span></label>
+      <input type="range" id="speedRange" min="0.2" max="1.5" step="0.1" value="0.6">
+    </div>
+    <div class="slider-row">
+      <label for="spinRange">Motor Spin: <span id="spinVal">0.10</span></label>
+      <input type="range" id="spinRange" min="0.04" max="0.25" step="0.01" value="0.10">
+    </div>
+    <div class="slider-row">
+      <label for="gravRange">Gravity: <span id="gravVal">0.35</span></label>
+      <input type="range" id="gravRange" min="0.1" max="0.8" step="0.05" value="0.35">
+    </div>
+  </div>
+
+  <div id="finish-banner">
+    <div id="winner-text">YOU WON! 🏆</div>
+    <button onclick="resetRace()" style="margin-top:10px; padding:6px 14px; font-weight:bold; border-radius:8px; border:none; background:#ffdd00; cursor:pointer;">Play Again</button>
+  </div>
+
   <canvas id="gameCanvas"></canvas>
-  <div id="status-pill">Draw a shape to drive & climb!</div>
 
   <div id="draw-box">
-    <canvas id="drawCanvas" width="180" height="180"></canvas>
+    <canvas id="drawCanvas" width="170" height="170"></canvas>
   </div>
 
   <script>
@@ -73,6 +127,30 @@
     const dCanvas = document.getElementById('drawCanvas');
     const dCtx = dCanvas.getContext('2d');
 
+    // UI elements
+    const speedSlider = document.getElementById('speedRange');
+    const spinSlider = document.getElementById('spinRange');
+    const gravSlider = document.getElementById('gravRange');
+    const finishBanner = document.getElementById('finish-banner');
+    const winnerText = document.getElementById('winner-text');
+
+    let gameSpeed = parseFloat(speedSlider.value);
+    let motorSpin = parseFloat(spinSlider.value);
+    let gravity = parseFloat(gravSlider.value);
+
+    speedSlider.oninput = (e) => {
+      gameSpeed = parseFloat(e.target.value);
+      document.getElementById('speedVal').innerText = gameSpeed.toFixed(1);
+    };
+    spinSlider.oninput = (e) => {
+      motorSpin = parseFloat(e.target.value);
+      document.getElementById('spinVal').innerText = motorSpin.toFixed(2);
+    };
+    gravSlider.oninput = (e) => {
+      gravity = parseFloat(e.target.value);
+      document.getElementById('gravVal').innerText = gravity.toFixed(2);
+    };
+
     function resize() {
       gCanvas.width = window.innerWidth;
       gCanvas.height = window.innerHeight;
@@ -80,15 +158,19 @@
     window.addEventListener('resize', resize);
     resize();
 
-    // --- TRACK SEGMENTS ---
+    // --- FINISHED COMPLETE TRACK (No Sudden Drop-off) ---
+    const FINISH_LINE_X = 2400;
+
     const track = [
-      { x1: -200, y1: 300, x2: 450,  y2: 300 }, // Start flat
-      { x1: 450,  y1: 300, x2: 450,  y2: 210 }, // Vertical step/wall
-      { x1: 450,  y1: 210, x2: 950,  y2: 210 }, // Top plateau
-      { x1: 950,  y1: 210, x2: 1300, y2: 340 }, // Slope down
-      { x1: 1300, y1: 340, x2: 1700, y2: 340 }, // Flat basin
-      { x1: 1700, y1: 340, x2: 1850, y2: 220 }, // Steep ramp up
-      { x1: 1850, y1: 220, x2: 4000, y2: 220 }  // Final run
+      { x1: -200, y1: 300, x2: 400,  y2: 300 }, // Start runway
+      { x1: 400,  y1: 300, x2: 400,  y2: 220 }, // Step ledge
+      { x1: 400,  y1: 220, x2: 900,  y2: 220 }, // Plateau
+      { x1: 900,  y1: 220, x2: 1250, y2: 330 }, // Gentle slope down
+      { x1: 1250, y1: 330, x2: 1650, y2: 330 }, // Valley floor
+      { x1: 1650, y1: 330, x2: 1800, y2: 250 }, // Ramp up
+      { x1: 1800, y1: 250, x2: 2600, y2: 250 }, // Straightaway through finish line
+      { x1: 2600, y1: 250, x2: 2800, y2: 200 }, // Gentle uphill brake stop
+      { x1: 2800, y1: 200, x2: 3200, y2: 200 }  // End pad
     ];
 
     function getGroundY(x) {
@@ -101,11 +183,11 @@
           return s.y1 + t * (s.y2 - s.y1);
         }
       }
-      return 600;
+      return 200;
     }
 
     // Default round wheel generator
-    function getCircle(radius = 34, count = 16) {
+    function getCircle(radius = 32, count = 16) {
       const pts = [];
       for (let i = 0; i <= count; i++) {
         const a = (i / count) * Math.PI * 2;
@@ -124,19 +206,21 @@
     }
 
     function renderPadPreview(pts) {
-      dCtx.clearRect(0, 0, 180, 180);
+      dCtx.clearRect(0, 0, 170, 170);
       dCtx.lineWidth = 6;
       dCtx.lineCap = 'round';
       dCtx.strokeStyle = '#111';
       dCtx.beginPath();
       for (let i = 0; i < pts.length; i++) {
-        const px = 90 + pts[i].x;
-        const py = 90 + pts[i].y;
+        const px = 85 + pts[i].x;
+        const py = 85 + pts[i].y;
         if (i === 0) dCtx.moveTo(px, py);
         else dCtx.lineTo(px, py);
       }
       dCtx.stroke();
     }
+
+    let raceFinished = false;
 
     const player = {
       x: 60,
@@ -149,7 +233,7 @@
     };
 
     const bot = {
-      x: 10,
+      x: 0,
       y: 200,
       vx: 0,
       vy: 0,
@@ -161,12 +245,33 @@
 
     renderPadPreview(player.points);
 
-    // --- ENHANCED PHYSICS ENGINE ---
+    function resetRace() {
+      player.x = 60;
+      player.y = 200;
+      player.vx = 0;
+      player.vy = 0;
+      player.angle = 0;
+      player.points = getCircle();
+
+      bot.x = 0;
+      bot.y = 200;
+      bot.vx = 0;
+      bot.vy = 0;
+      bot.angle = 0;
+      bot.points = getCircle();
+      bot.adapted = false;
+
+      raceFinished = false;
+      finishBanner.style.display = 'none';
+      renderPadPreview(player.points);
+    }
+
+    // --- TUNED STEADY PHYSICS ---
     function updateRacer(r, isAI = false) {
-      r.angle += 0.22;
+      r.angle += motorSpin * gameSpeed;
       let contacts = 0;
       let lift = 0;
-      let forwardDrive = 0;
+      let pushForward = 0;
 
       for (const pt of r.points) {
         const cos = Math.cos(r.angle);
@@ -178,47 +283,54 @@
         if (py > groundY) {
           contacts++;
           const depth = py - groundY;
-          lift += depth * 0.35;
-          forwardDrive += 1.1; // Forward propulsion per contact point
+          lift += depth * 0.25;
+          pushForward += 0.55 * gameSpeed;
         }
 
-        // Ledge-catching hook check (vertical wall traversal)
-        if (px >= 445 && px <= 455 && py < 300 && py > 210) {
-          lift += 3.5;
-          forwardDrive += 2.0;
+        // Ledge climbing boost
+        if (px >= 395 && px <= 405 && py < 300 && py > 220) {
+          lift += 2.0;
+          pushForward += 1.0 * gameSpeed;
         }
       }
 
       if (contacts > 0) {
         r.vy -= lift;
-        r.vx += forwardDrive;
-        // Enforce strong forward traction; prevent sliding backwards down slopes
-        if (r.vx < 2.0) r.vx = 2.0;
+        r.vx += pushForward;
+        // Directional lock: cannot slip backward
+        if (r.vx < 1.0 * gameSpeed) r.vx = 1.0 * gameSpeed;
       }
 
-      // Gravity and air drag
-      r.vy += 0.65;
-      r.vx *= 0.90;
-      r.vy *= 0.90;
+      // Smooth gravity & air friction
+      r.vy += gravity * gameSpeed;
+      r.vx *= 0.92;
+      r.vy *= 0.92;
 
       r.x += r.vx;
       r.y += r.vy;
 
-      // Keep chassis hovering safely on wheel hubs
+      // Chassis ground plane collision
       const groundAtCenter = getGroundY(r.x);
       if (r.y > groundAtCenter - 14) {
         r.y = groundAtCenter - 14;
         if (r.vy > 0) r.vy = 0;
       }
 
-      // AI auto-morph near obstacle
-      if (isAI && !r.adapted && r.x > 380) {
+      // Finish line check
+      if (!raceFinished && r.x >= FINISH_LINE_X) {
+        raceFinished = true;
+        finishBanner.style.display = 'block';
+        winnerText.innerText = isAI ? 'BOT WON! 🤖' : 'YOU WON! 🏆';
+      }
+
+      // AI reacts near obstacle
+      if (isAI && !r.adapted && r.x > 340) {
         r.points = getClimber();
         r.adapted = true;
       }
     }
 
-    // --- DRAWING INTERACTION ---
+    // --- DRAWING PAD LOGIC ---
     let drawing = false;
     let stroke = [];
 
@@ -226,8 +338,8 @@
       const r = dCanvas.getBoundingClientRect();
       const t = e.touches ? e.touches[0] : e;
       return {
-        x: (t.clientX - r.left) * (180 / r.width),
-        y: (t.clientY - r.top) * (180 / r.height)
+        x: (t.clientX - r.left) * (170 / r.width),
+        y: (t.clientY - r.top) * (170 / r.height)
       };
     }
 
@@ -235,7 +347,7 @@
       e.preventDefault();
       drawing = true;
       stroke = [];
-      dCtx.clearRect(0, 0, 180, 180);
+      dCtx.clearRect(0, 0, 170, 170);
       drawMove(e);
     }
 
@@ -245,7 +357,7 @@
       const p = getTouchPos(e);
       stroke.push(p);
 
-      dCtx.lineWidth = 7;
+      dCtx.lineWidth = 6;
       dCtx.lineCap = 'round';
       dCtx.strokeStyle = '#111';
       if (stroke.length > 1) {
@@ -271,7 +383,7 @@
 
       const cx = (minX + maxX) / 2;
       const cy = (minY + maxY) / 2;
-      const scale = Math.max(maxX - minX, maxY - minY, 30) / 75;
+      const scale = Math.max(maxX - minX, maxY - minY, 30) / 70;
 
       const pts = [];
       const step = Math.max(1, Math.floor(stroke.length / 16));
@@ -295,11 +407,11 @@
       gCtx.save();
       gCtx.translate(r.x, r.y);
 
-      // Rotating limbs
+      // Limbs / wheels
       gCtx.save();
       gCtx.rotate(r.angle);
       gCtx.strokeStyle = '#111';
-      gCtx.lineWidth = 7;
+      gCtx.lineWidth = 6;
       gCtx.lineCap = 'round';
       gCtx.lineJoin = 'round';
       if (r.points.length > 1) {
@@ -314,16 +426,16 @@
 
       // Chassis body
       gCtx.fillStyle = r.color;
-      gCtx.fillRect(-22, -18, 44, 24);
+      gCtx.fillRect(-20, -16, 40, 22);
 
       // Rider
       gCtx.fillStyle = '#fff';
       gCtx.beginPath();
-      gCtx.arc(0, -22, 10, 0, Math.PI * 2);
+      gCtx.arc(0, -20, 9, 0, Math.PI * 2);
       gCtx.fill();
       gCtx.fillStyle = '#111';
       gCtx.beginPath();
-      gCtx.arc(4, -22, 3, 0, Math.PI * 2);
+      gCtx.arc(3, -20, 2.5, 0, Math.PI * 2);
       gCtx.fill();
 
       gCtx.restore();
@@ -334,11 +446,11 @@
       updateRacer(player);
       updateRacer(bot, true);
 
-      // Camera smoothly tracks player
+      // Camera smoothly follows player
       const camX = player.x - gCanvas.width * 0.35;
       const camY = player.y - gCanvas.height * 0.55;
 
-      // Sky
+      // Sky background
       gCtx.fillStyle = '#8ae2ff';
       gCtx.fillRect(0, 0, gCanvas.width, gCanvas.height);
 
@@ -357,14 +469,33 @@
       }
       gCtx.stroke();
 
-      // Dirt fill
-      gCtx.lineTo(4200, 900);
+      // Terrain underfill
+      gCtx.lineTo(3400, 900);
       gCtx.lineTo(-300, 900);
       gCtx.closePath();
       gCtx.fillStyle = '#8b5a2b';
       gCtx.fill();
 
-      // Draw competitors
+      // Finish Line Marker
+      const finishGroundY = getGroundY(FINISH_LINE_X);
+      gCtx.strokeStyle = '#fff';
+      gCtx.lineWidth = 6;
+      gCtx.setLineDash([12, 12]);
+      gCtx.beginPath();
+      gCtx.moveTo(FINISH_LINE_X, finishGroundY);
+      gCtx.lineTo(FINISH_LINE_X, finishGroundY - 140);
+      gCtx.stroke();
+      gCtx.setLineDash([]);
+
+      // Finish Flag
+      gCtx.fillStyle = '#ff3344';
+      gCtx.beginPath();
+      gCtx.moveTo(FINISH_LINE_X, finishGroundY - 140);
+      gCtx.lineTo(FINISH_LINE_X + 35, finishGroundY - 120);
+      gCtx.lineTo(FINISH_LINE_X, finishGroundY - 100);
+      gCtx.fill();
+
+      // Render Racers
       renderRacer(bot);
       renderRacer(player);
 
