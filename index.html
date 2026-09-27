@@ -3,42 +3,40 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Scribble Racer</title>
+  <title>Scribble Climber</title>
   <style>
-    * { box-sizing: border-box; touch-action: none; }
+    * { box-sizing: border-box; touch-action: none; -webkit-tap-highlight-color: transparent; }
     html, body {
       margin: 0;
       padding: 0;
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: #7ec0ee;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #8ae2ff;
+      font-family: system-ui, -apple-system, sans-serif;
     }
     #gameCanvas {
       position: absolute;
       top: 0;
       left: 0;
-      width: 100%;
-      height: 100%;
+      width: 100vw;
+      height: 100vh;
       display: block;
+      background: #8ae2ff;
     }
-    #ui-container {
+    #status-pill {
       position: absolute;
-      top: 14px;
-      left: 0;
-      width: 100%;
-      text-align: center;
-      pointer-events: none;
-    }
-    .badge {
-      display: inline-block;
-      background: rgba(0, 0, 0, 0.6);
+      top: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.7);
       color: #fff;
-      padding: 6px 16px;
+      padding: 8px 18px;
       border-radius: 20px;
       font-size: 14px;
       font-weight: 600;
+      pointer-events: none;
+      z-index: 10;
     }
     #draw-box {
       position: absolute;
@@ -47,88 +45,97 @@
       transform: translateX(-50%);
       width: 180px;
       height: 180px;
-      background: rgba(255, 255, 255, 0.95);
-      border: 3px solid #222;
+      background: #ffffff;
+      border: 3px solid #111;
       border-radius: 20px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-      touch-action: none;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+      z-index: 20;
     }
     #drawCanvas {
-      width: 100%;
-      height: 100%;
+      width: 180px;
+      height: 180px;
       display: block;
       border-radius: 17px;
-      cursor: crosshair;
     }
   </style>
 </head>
 <body>
   <canvas id="gameCanvas"></canvas>
-  
-  <div id="ui-container">
-    <div class="badge" id="statusBadge">Draw a shape below to run!</div>
-  </div>
+  <div id="status-pill">Draw a shape to drive & climb!</div>
 
   <div id="draw-box">
     <canvas id="drawCanvas" width="180" height="180"></canvas>
   </div>
 
   <script>
-    // --- 1. DISPLAY & VIEWPORT SETUP ---
     const gCanvas = document.getElementById('gameCanvas');
     const gCtx = gCanvas.getContext('2d');
     const dCanvas = document.getElementById('drawCanvas');
     const dCtx = dCanvas.getContext('2d');
 
     function resize() {
-      gCanvas.width = window.innerWidth * window.devicePixelRatio;
-      gCanvas.height = window.innerHeight * window.devicePixelRatio;
+      gCanvas.width = window.innerWidth;
+      gCanvas.height = window.innerHeight;
     }
     window.addEventListener('resize', resize);
     resize();
 
-    // --- 2. TRACK GEOMETRY ---
-    // Track segments with varying elevation and obstacles
+    // --- TRACK SEGMENTS ---
     const track = [
-      { x1: -50,  y1: 300, x2: 400,  y2: 300 }, // Start flat
-      { x1: 400,  y1: 300, x2: 400,  y2: 240 }, // Step ledge up
-      { x1: 400,  y1: 240, x2: 900,  y2: 240 }, // High ground
-      { x1: 900,  y1: 240, x2: 1200, y2: 350 }, // Down ramp
-      { x1: 1200, y1: 350, x2: 1500, y2: 350 }, // Water / basin bed
-      { x1: 1500, y1: 350, x2: 1600, y2: 260 }, // Steep ramp up
-      { x1: 1600, y1: 260, x2: 2600, y2: 260 }  // Final sprint
+      { x1: -200, y1: 300, x2: 450,  y2: 300 }, // Start flat
+      { x1: 450,  y1: 300, x2: 450,  y2: 210 }, // Vertical step/wall
+      { x1: 450,  y1: 210, x2: 950,  y2: 210 }, // Top plateau
+      { x1: 950,  y1: 210, x2: 1300, y2: 340 }, // Slope down
+      { x1: 1300, y1: 340, x2: 1700, y2: 340 }, // Flat basin
+      { x1: 1700, y1: 340, x2: 1850, y2: 220 }, // Steep ramp up
+      { x1: 1850, y1: 220, x2: 4000, y2: 220 }  // Final run
     ];
 
     function getGroundY(x) {
-      for (const seg of track) {
-        const minX = Math.min(seg.x1, seg.x2);
-        const maxX = Math.max(seg.x1, seg.x2);
+      for (const s of track) {
+        const minX = Math.min(s.x1, s.x2);
+        const maxX = Math.max(s.x1, s.x2);
         if (x >= minX && x <= maxX) {
-          if (seg.x1 === seg.x2) return Math.min(seg.y1, seg.y2);
-          const t = (x - seg.x1) / (seg.x2 - seg.x1);
-          return seg.y1 + t * (seg.y2 - seg.y1);
+          if (s.x1 === s.x2) return Math.min(s.y1, s.y2);
+          const t = (x - s.x1) / (s.x2 - s.x1);
+          return s.y1 + t * (s.y2 - s.y1);
         }
       }
       return 600;
     }
 
-    // --- 3. RACER SIMULATION ---
-    function makeDefaultPoints() {
+    // Default round wheel generator
+    function getCircle(radius = 34, count = 16) {
       const pts = [];
-      for (let i = 0; i < 16; i++) {
-        const a = (i / 16) * Math.PI * 2;
-        pts.push({ x: Math.cos(a) * 32, y: Math.sin(a) * 32 });
+      for (let i = 0; i <= count; i++) {
+        const a = (i / count) * Math.PI * 2;
+        pts.push({ x: Math.cos(a) * radius, y: Math.sin(a) * radius });
       }
       return pts;
     }
 
-    function makeClimberPoints() {
+    function getClimber() {
       return [
-        { x: 0, y: -45 },
-        { x: 25, y: 35 },
-        { x: -35, y: 15 },
-        { x: 0, y: -45 }
+        { x: -10, y: -45 },
+        { x: 35, y: 35 },
+        { x: -40, y: 20 },
+        { x: -10, y: -45 }
       ];
+    }
+
+    function renderPadPreview(pts) {
+      dCtx.clearRect(0, 0, 180, 180);
+      dCtx.lineWidth = 6;
+      dCtx.lineCap = 'round';
+      dCtx.strokeStyle = '#111';
+      dCtx.beginPath();
+      for (let i = 0; i < pts.length; i++) {
+        const px = 90 + pts[i].x;
+        const py = 90 + pts[i].y;
+        if (i === 0) dCtx.moveTo(px, py);
+        else dCtx.lineTo(px, py);
+      }
+      dCtx.stroke();
     }
 
     const player = {
@@ -137,32 +144,31 @@
       vx: 0,
       vy: 0,
       angle: 0,
-      points: makeDefaultPoints(),
+      points: getCircle(),
       color: '#e63946'
     };
 
     const bot = {
-      x: 20,
+      x: 10,
       y: 200,
       vx: 0,
       vy: 0,
       angle: 0,
-      points: makeDefaultPoints(),
-      color: '#457b9d',
+      points: getCircle(),
+      color: '#1d3557',
       adapted: false
     };
 
-    function updateRacer(r, isAI = false) {
-      // Motor angular rotation
-      r.angle += 0.22;
+    renderPadPreview(player.points);
 
-      // Check limb tips against the terrain
-      let onGround = false;
-      let pushX = 0;
-      let pushY = 0;
+    // --- ENHANCED PHYSICS ENGINE ---
+    function updateRacer(r, isAI = false) {
+      r.angle += 0.22;
+      let contacts = 0;
+      let lift = 0;
+      let forwardDrive = 0;
 
       for (const pt of r.points) {
-        // Rotate point
         const cos = Math.cos(r.angle);
         const sin = Math.sin(r.angle);
         const px = r.x + (pt.x * cos - pt.y * sin);
@@ -170,68 +176,78 @@
 
         const groundY = getGroundY(px);
         if (py > groundY) {
-          onGround = true;
-          const penetration = py - groundY;
-          pushY -= penetration * 0.4;
-          // Forward traction propulsion
-          pushX += 0.95;
+          contacts++;
+          const depth = py - groundY;
+          lift += depth * 0.35;
+          forwardDrive += 1.1; // Forward propulsion per contact point
+        }
+
+        // Ledge-catching hook check (vertical wall traversal)
+        if (px >= 445 && px <= 455 && py < 300 && py > 210) {
+          lift += 3.5;
+          forwardDrive += 2.0;
         }
       }
 
-      // Physics integration
-      r.vx += pushX;
-      r.vy += pushY + 0.65; // Gravity
-      r.vx *= 0.88;         // Drag
-      r.vy *= 0.88;
+      if (contacts > 0) {
+        r.vy -= lift;
+        r.vx += forwardDrive;
+        // Enforce strong forward traction; prevent sliding backwards down slopes
+        if (r.vx < 2.0) r.vx = 2.0;
+      }
+
+      // Gravity and air drag
+      r.vy += 0.65;
+      r.vx *= 0.90;
+      r.vy *= 0.90;
 
       r.x += r.vx;
       r.y += r.vy;
 
-      // Keep chassis above track line
-      const baseline = getGroundY(r.x) - 15;
-      if (r.y > baseline) {
-        r.y = baseline;
-        r.vy = 0;
+      // Keep chassis hovering safely on wheel hubs
+      const groundAtCenter = getGroundY(r.x);
+      if (r.y > groundAtCenter - 14) {
+        r.y = groundAtCenter - 14;
+        if (r.vy > 0) r.vy = 0;
       }
 
-      // AI auto-switch near the step obstacle
-      if (isAI && !r.adapted && r.x > 330) {
-        r.points = makeClimberPoints();
+      // AI auto-morph near obstacle
+      if (isAI && !r.adapted && r.x > 380) {
+        r.points = getClimber();
         r.adapted = true;
       }
     }
 
-    // --- 4. DRAWING CANVAS LOGIC ---
-    let isDrawing = false;
+    // --- DRAWING INTERACTION ---
+    let drawing = false;
     let stroke = [];
 
-    function getCoords(e) {
-      const rect = dCanvas.getBoundingClientRect();
-      const cx = e.touches ? e.touches[0].clientX : e.clientX;
-      const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    function getTouchPos(e) {
+      const r = dCanvas.getBoundingClientRect();
+      const t = e.touches ? e.touches[0] : e;
       return {
-        x: (cx - rect.left) * (dCanvas.width / rect.width),
-        y: (cy - rect.top) * (dCanvas.height / rect.height)
+        x: (t.clientX - r.left) * (180 / r.width),
+        y: (t.clientY - r.top) * (180 / r.height)
       };
     }
 
-    function onPointerDown(e) {
+    function startDraw(e) {
       e.preventDefault();
-      isDrawing = true;
+      drawing = true;
       stroke = [];
-      dCtx.clearRect(0, 0, dCanvas.width, dCanvas.height);
-      onPointerMove(e);
+      dCtx.clearRect(0, 0, 180, 180);
+      drawMove(e);
     }
 
-    function onPointerMove(e) {
-      if (!isDrawing) return;
+    function drawMove(e) {
+      if (!drawing) return;
       e.preventDefault();
-      const p = getCoords(e);
+      const p = getTouchPos(e);
       stroke.push(p);
 
-      dCtx.lineWidth = 8;
+      dCtx.lineWidth = 7;
       dCtx.lineCap = 'round';
-      dCtx.strokeStyle = '#1d3557';
+      dCtx.strokeStyle = '#111';
       if (stroke.length > 1) {
         dCtx.beginPath();
         dCtx.moveTo(stroke[stroke.length - 2].x, stroke[stroke.length - 2].y);
@@ -240,12 +256,11 @@
       }
     }
 
-    function onPointerUp(e) {
-      if (!isDrawing) return;
-      isDrawing = false;
+    function endDraw(e) {
+      if (!drawing) return;
+      drawing = false;
       if (stroke.length < 3) return;
 
-      // Center and normalize drawn coordinates
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       for (const p of stroke) {
         if (p.x < minX) minX = p.x;
@@ -256,7 +271,7 @@
 
       const cx = (minX + maxX) / 2;
       const cy = (minY + maxY) / 2;
-      const scale = Math.max(maxX - minX, maxY - minY, 30) / 70;
+      const scale = Math.max(maxX - minX, maxY - minY, 30) / 75;
 
       const pts = [];
       const step = Math.max(1, Math.floor(stroke.length / 16));
@@ -270,28 +285,23 @@
       player.points = pts;
     }
 
-    // Touch and mouse event binds
-    dCanvas.addEventListener('mousedown', onPointerDown);
-    window.addEventListener('mousemove', onPointerMove);
-    window.addEventListener('mouseup', onPointerUp);
+    dCanvas.addEventListener('pointerdown', startDraw);
+    dCanvas.addEventListener('pointermove', drawMove);
+    dCanvas.addEventListener('pointerup', endDraw);
+    dCanvas.addEventListener('pointercancel', endDraw);
 
-    dCanvas.addEventListener('touchstart', onPointerDown, { passive: false });
-    window.addEventListener('touchmove', onPointerMove, { passive: false });
-    window.addEventListener('touchend', onPointerUp);
-
-    // --- 5. RENDER LOOP ---
+    // --- RENDER RACERS ---
     function renderRacer(r) {
       gCtx.save();
       gCtx.translate(r.x, r.y);
 
-      // Limbs / wheels
+      // Rotating limbs
       gCtx.save();
       gCtx.rotate(r.angle);
       gCtx.strokeStyle = '#111';
       gCtx.lineWidth = 7;
       gCtx.lineCap = 'round';
       gCtx.lineJoin = 'round';
-
       if (r.points.length > 1) {
         gCtx.beginPath();
         gCtx.moveTo(r.points[0].x, r.points[0].y);
@@ -302,11 +312,11 @@
       }
       gCtx.restore();
 
-      // Vehicle Chassis Body
+      // Chassis body
       gCtx.fillStyle = r.color;
       gCtx.fillRect(-22, -18, 44, 24);
 
-      // Rider head
+      // Rider
       gCtx.fillStyle = '#fff';
       gCtx.beginPath();
       gCtx.arc(0, -22, 10, 0, Math.PI * 2);
@@ -319,46 +329,42 @@
       gCtx.restore();
     }
 
+    // --- GAME LOOP ---
     function loop() {
       updateRacer(player);
       updateRacer(bot, true);
 
-      // Dynamic Camera follow
-      const dpr = window.devicePixelRatio || 1;
-      const viewW = gCanvas.width / dpr;
-      const viewH = gCanvas.height / dpr;
-      const camX = player.x - viewW * 0.35;
-      const camY = player.y - viewH * 0.55;
+      // Camera smoothly tracks player
+      const camX = player.x - gCanvas.width * 0.35;
+      const camY = player.y - gCanvas.height * 0.55;
 
-      gCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      // Sky background
-      gCtx.fillStyle = '#a8e6cf';
-      gCtx.fillRect(0, 0, viewW, viewH);
+      // Sky
+      gCtx.fillStyle = '#8ae2ff';
+      gCtx.fillRect(0, 0, gCanvas.width, gCanvas.height);
 
       gCtx.save();
       gCtx.translate(-camX, -camY);
 
-      // Draw Terrain / Path
-      gCtx.strokeStyle = '#555';
+      // Track surface
+      gCtx.strokeStyle = '#444';
       gCtx.lineWidth = 14;
       gCtx.lineCap = 'round';
       gCtx.lineJoin = 'round';
       gCtx.beginPath();
       gCtx.moveTo(track[0].x1, track[0].y1);
-      for (const seg of track) {
-        gCtx.lineTo(seg.x2, seg.y2);
+      for (const s of track) {
+        gCtx.lineTo(s.x2, s.y2);
       }
       gCtx.stroke();
 
-      // Terrain fill underneath
-      gCtx.lineTo(3000, 800);
-      gCtx.lineTo(-100, 800);
+      // Dirt fill
+      gCtx.lineTo(4200, 900);
+      gCtx.lineTo(-300, 900);
       gCtx.closePath();
       gCtx.fillStyle = '#8b5a2b';
       gCtx.fill();
 
-      // Render Racers
+      // Draw competitors
       renderRacer(bot);
       renderRacer(player);
 
